@@ -1,4 +1,4 @@
-name: "Elixir-like-cplusplus — 3OS Build + ProofLedger + Output"
+name: "Elixir-like-cplusplus — 3OS Build + ProofLedger + Safe Parser Build"
 
 on:
   push:
@@ -13,7 +13,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-3os:
+  build:
     name: "Build — ${{ matrix.os }}"
     runs-on: ${{ matrix.os }}
     strategy:
@@ -21,68 +21,88 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
 
     steps:
-      - name: Checkout repo
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # -------------------------------
-      # C++ Build Environment
-      # -------------------------------
-      - name: Setup C++ compiler on Windows
+      # -----------------------------
+      # Compiler 준비
+      # -----------------------------
+      - name: Install C++ compiler (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt update
+          sudo apt install -y g++
+
+      - name: Install C++ compiler (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          brew install llvm || true
+
+      - name: Setup MSVC (Windows)
         if: matrix.os == 'windows-latest'
         uses: microsoft/setup-msbuild@v2
 
-      - name: Setup C++ compiler on Linux/macOS
-        if: matrix.os != 'windows-latest'
-        run: |
-          sudo apt update || true
-          sudo apt install -y g++ || true
-
-      # -------------------------------
-      # Build the project
-      # -------------------------------
-      - name: Build
+      # -----------------------------
+      # Build
+      # -----------------------------
+      - name: Build project
         run: |
           mkdir -p build
           cd build
-          g++ ../src/*.cpp -std=c++17 -o elixir_cpp
 
-      # -------------------------------
-      # Run example.elx
-      # -------------------------------
-      - name: Run example
+          echo "Compiling..."
+          g++ ../src/*.cpp -std=c++17 -O2 -o elixir_cpp
+
+      # -----------------------------
+      # example.elx 존재 여부 체크
+      # -----------------------------
+      - name: Check example.elx
+        run: |
+          if [ ! -f "example.elx" ] && [ ! -f "./example.elx" ]; then
+            echo "example.elx 파일이 없습니다!"
+            exit 1
+          fi
+        shell: bash
+
+      # -----------------------------
+      # Run
+      # -----------------------------
+      - name: Run DSL converter
         run: |
           cd build
           echo "### Running example.elx ###"
-          ./elixir_cpp || .\elixir_cpp.exe
+          ./elixir_cpp ../example.elx || .\elixir_cpp.exe ..\example.elx
+        continue-on-error: false
 
-      # -------------------------------
-      # Create output text (generated C++)
-      # -------------------------------
-      - name: Capture generated C++ output
+      # -----------------------------
+      # Output 저장
+      # -----------------------------
+      - name: Capture output
         run: |
           cd build
-          ./elixir_cpp > out_cpp.txt || .\elixir_cpp.exe > out_cpp.txt
+          ./elixir_cpp ../example.elx > out_cpp.txt \
+            || .\elixir_cpp.exe ..\example.elx > out_cpp.txt
 
-      # -------------------------------
-      # ProofLedger
-      # -------------------------------
+      # -----------------------------
+      # ProofLedger 생성
+      # -----------------------------
       - name: Generate ProofLedger
         run: |
-          echo "Repository: Elixir-like-cplusplus"            >  proofledger-${{ matrix.os }}-${{ github.ref_name }}.txt
-          echo "Commit: ${{ github.sha }}"                    >> proofledger-${{ matrix.os }}-${{ github.ref_name }}.txt
-          echo "OS: ${{ matrix.os }}"                          >> proofledger-${{ matrix.os }}-${{ github.ref_name }}.txt
-          echo "Build Time: $(date)"                           >> proofledger-${{ matrix.os }}-${{ github.ref_name }}.txt
-          echo "Generated File: out_cpp.txt"                   >> proofledger-${{ matrix.os }}-${{ github.ref_name }}.txt
+          echo "Repository: Elixir-like-cplusplus" >  proofledger-${{ matrix.os }}-${{ github.ref_name }}.txt
+          echo "Commit: ${{ github.sha }}"       >> proofledger-${{ matrix.os }}-${{ github.ref_name }}.txt
+          echo "OS: ${{ matrix.os }}"            >> proofledger-${{ matrix.os }}-${{ github.ref_name }}.txt
+          echo "Build Time: $(date)"             >> proofledger-${{ matrix.os }}-${{ github.ref_name }}.txt
+          echo "Output: out_cpp.txt"             >> proofledger-${{ matrix.os }}-${{ github.ref_name }}.txt
 
-      # -------------------------------
+      # -----------------------------
       # Upload Artifacts
-      # -------------------------------
-      - name: Upload output
+      # -----------------------------
+      - name: Upload out_cpp
         uses: actions/upload-artifact@v4
         with:
-          name: out-cpp-${{ matrix.os }}-${{ github.ref_name }}
+          name: out_cpp-${{ matrix.os }}-${{ github.ref_name }}
           path: build/out_cpp.txt
 
       - name: Upload ProofLedger
